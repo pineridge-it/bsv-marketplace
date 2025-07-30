@@ -1,0 +1,305 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Basic info
+  name     String
+  email    String  @unique
+  password String?
+  image    String?
+
+  // Role-based access
+  role UserRole @default(CONSUMER)
+
+  // BSV wallet integration
+  bsvWalletId String?
+
+  // Trust network data
+  trustNetwork Json?
+
+  // Relations
+  contentItems    ContentItem[]
+  purchases       Purchase[]
+  transactions    Transaction[]
+  baskets         Basket[]
+  apiAccess       ApiAccess[]
+  certificates    Certificate[] @relation("CertificateSubject")
+  issuedCerts     Certificate[] @relation("CertificateIssuer")
+  sessions        Session[]
+  accounts        Account[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+model ContentItem {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Basic content info
+  title       String
+  description String?
+  contentType ContentType
+
+  // BSV blockchain integration
+  uhrpHash String @unique // Universal Hash Resource Protocol hash
+
+  // File information
+  fileUrl      String
+  thumbnailUrl String?
+  fileSize     BigInt?
+  duration     Int? // in seconds for video/audio
+
+  // Pricing model
+  pricing Json
+
+  // Metadata
+  tags         String[]
+  overlayTopic String? // For BSV overlay network
+
+  // Analytics
+  totalViews     Int @default(0)
+  totalDownloads Int @default(0)
+  totalEarnings  Int @default(0) // in satoshis
+
+  // Relations
+  creatorId     String
+  creator       User           @relation(fields: [creatorId], references: [id])
+  purchases     Purchase[]
+  basketItems   BasketItem[]
+
+  @@map("content_items")
+}
+
+model Purchase {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Purchase details
+  userId        String
+  contentId     String
+  purchaseType  PurchaseType
+  amount        Int // in satoshis
+  usageData     Json? // tracks usage for different pricing models
+
+  // BSV transaction
+  txHash String?
+
+  // Relations
+  user    User        @relation(fields: [userId], references: [id])
+  content ContentItem @relation(fields: [contentId], references: [id])
+
+  @@map("purchases")
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Transaction details
+  userId String
+  type   TransactionType
+  amount Int // in satoshis (can be negative for payments)
+  fees   Int @default(0)
+  status TransactionStatus @default(PENDING)
+
+  // BSV blockchain data
+  txHash   String?
+  metadata Json?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("transactions")
+}
+
+model Basket {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Basket info
+  name        String
+  description String?
+  basketType  BasketType @default(PERSONAL)
+
+  // Relations
+  userId String
+  user   User         @relation(fields: [userId], references: [id])
+  items  BasketItem[]
+
+  @@map("baskets")
+}
+
+model BasketItem {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Access control
+  accessLevel AccessLevel @default(BASIC)
+
+  // Relations
+  basketId  String
+  contentId String
+  basket    Basket      @relation(fields: [basketId], references: [id])
+  content   ContentItem @relation(fields: [contentId], references: [id])
+
+  @@unique([basketId, contentId])
+  @@map("basket_items")
+}
+
+model ApiAccess {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // API key management
+  apiKey       String     @unique
+  accessLevel  ApiLevel   @default(BASIC)
+  usageLimit   Int        @default(1000)
+  currentUsage Int        @default(0)
+  isActive     Boolean    @default(true)
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("api_access")
+}
+
+model Certificate {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Certificate details
+  subjectId       String
+  issuerId        String
+  certificateType CertificateType
+  fields          Json // flexible certificate data
+  trustScore      Int             @default(0)
+  isRevoked       Boolean         @default(false)
+  expiresAt       DateTime?
+
+  // Relations
+  subject User @relation("CertificateSubject", fields: [subjectId], references: [id])
+  issuer  User @relation("CertificateIssuer", fields: [issuerId], references: [id])
+
+  @@map("certificates")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  CREATOR
+  CONSUMER
+  DEVELOPER
+}
+
+enum ContentType {
+  VIDEO
+  AUDIO
+  ARTICLE
+  DATASET
+  API_ENDPOINT
+}
+
+enum PurchaseType {
+  PER_SECOND
+  PER_DOWNLOAD
+  PER_VIEW
+  PER_API_CALL
+  ONE_TIME
+}
+
+enum TransactionType {
+  PURCHASE
+  PAYOUT
+  FEE
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum BasketType {
+  PERSONAL
+  SHARED
+  PUBLIC
+}
+
+enum AccessLevel {
+  BASIC
+  PREMIUM
+  FULL
+}
+
+enum ApiLevel {
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum CertificateType {
+  IDENTITY
+  AGE_VERIFICATION
+  PROFESSIONAL
+  ORGANIZATION
+}
